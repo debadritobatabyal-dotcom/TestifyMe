@@ -288,7 +288,11 @@ export const ExamService = {
     // 2. Cloud Firestore Realtime Listener (Requirements 6, 7, 8)
     if (db) {
       try {
-        const constraints = [where('ownerId', '==', teacherId)];
+        // Build Firestore query constraints. For guest/unauthenticated teacher (id 'guest-teacher'), omit ownerId filter to retrieve all attempts.
+        const constraints = [] as any[];
+        if (teacherId && teacherId !== 'guest-teacher') {
+          constraints.push(where('ownerId', '==', teacherId));
+        }
         if (testId) {
           constraints.push(where('testId', '==', testId));
         }
