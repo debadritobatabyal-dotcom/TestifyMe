@@ -12,9 +12,8 @@ import {
   Hash,
   Phone,
   AlertCircle,
-  ArrowLeft,
   X,
-  ArrowRight,
+  Building,
 } from 'lucide-react';
 
 export interface LoginViewProps {
@@ -28,17 +27,17 @@ export interface LoginViewProps {
 export const LoginView: React.FC<LoginViewProps> = ({
   onLoginSuccess,
   initialRole = 'student',
-  initialMode = 'register',
+  initialMode = 'login',
   isModal = false,
   onClose,
 }) => {
-  const [selectedPortal, setSelectedPortal] = useState<'landing' | 'student' | 'teacher'>(
-    initialRole === 'teacher' ? 'teacher' : initialRole === 'student' ? 'student' : 'landing'
+  // Current active portal: 'student' or 'teacher'
+  const [selectedPortal, setSelectedPortal] = useState<'student' | 'teacher'>(
+    initialRole === 'teacher' ? 'teacher' : 'student'
   );
 
-  // Teacher mode: 'login' or 'register'
+  // Modes for each portal
   const [teacherMode, setTeacherMode] = useState<'login' | 'register'>('login');
-  // Student mode: 'login' or 'register' (default to initialMode or 'register' for first time students)
   const [studentMode, setStudentMode] = useState<'login' | 'register'>(initialMode);
 
   // Fields
@@ -61,6 +60,21 @@ export const LoginView: React.FC<LoginViewProps> = ({
     setIsLoading(true);
 
     if (teacherMode === 'register') {
+      if (!teacherName.trim()) {
+        setError('Please enter your full name.');
+        setIsLoading(false);
+        return;
+      }
+      if (!email.trim() || !password.trim()) {
+        setError('Please enter your email and password.');
+        setIsLoading(false);
+        return;
+      }
+      if (password.length < 6) {
+        setError('Password must be at least 6 characters.');
+        setIsLoading(false);
+        return;
+      }
       if (password !== confirmPassword) {
         setError('Passwords do not match. Please re-enter your password.');
         setIsLoading(false);
@@ -68,11 +82,11 @@ export const LoginView: React.FC<LoginViewProps> = ({
       }
 
       const res = await AuthService.registerTeacher({
-        name: teacherName,
-        email,
-        password,
-        confirmPassword,
-        schoolName: schoolName || undefined,
+        name: teacherName.trim(),
+        email: email.trim(),
+        password: password.trim(),
+        confirmPassword: confirmPassword.trim(),
+        schoolName: schoolName.trim() || undefined,
       });
       setIsLoading(false);
 
@@ -88,7 +102,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
         return;
       }
 
-      const res = await AuthService.loginTeacher(email, password);
+      const res = await AuthService.loginTeacher(email.trim(), password.trim());
       setIsLoading(false);
 
       if (res.error) {
@@ -142,7 +156,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
         return;
       }
 
-      const res = await AuthService.loginStudent(email, password);
+      const res = await AuthService.loginStudent(email.trim(), password.trim());
       setIsLoading(false);
       if (res.error) {
         setError(res.error);
@@ -152,106 +166,67 @@ export const LoginView: React.FC<LoginViewProps> = ({
     }
   };
 
-  // Content for the forms
-  const formContent = (
-    <div className="w-full">
-      {/* 1. Landing Choice: Two Clear Options */}
-      {selectedPortal === 'landing' && (
-        <Card variant="elevated" padding="md" className="space-y-4 text-center">
-          <h2 className="text-base font-heading font-extrabold text-[#332F3A]">
-            Choose Portal to Continue
-          </h2>
+  const formCard = (
+    <Card variant="elevated" padding="md" className="space-y-4">
+      {/* Top Portal Switcher: Student vs Teacher */}
+      <div className="grid grid-cols-2 p-1.5 bg-[#F4F1FA] rounded-2xl border border-purple-500/15 text-xs sm:text-sm font-heading font-extrabold shadow-inner">
+        <button
+          type="button"
+          onClick={() => { setSelectedPortal('student'); setError(null); }}
+          className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl transition-all ${
+            selectedPortal === 'student'
+              ? 'bg-gradient-to-r from-[#7C3AED] to-[#8B5CF6] text-white shadow-md'
+              : 'text-[#635F69] hover:text-[#332F3A]'
+          }`}
+        >
+          <GraduationCap className="w-4 h-4 shrink-0" />
+          <span>Student Portal</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => { setSelectedPortal('teacher'); setError(null); }}
+          className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl transition-all ${
+            selectedPortal === 'teacher'
+              ? 'bg-gradient-to-r from-[#DB2777] to-[#EC4899] text-white shadow-md'
+              : 'text-[#635F69] hover:text-[#332F3A]'
+          }`}
+        >
+          <BookOpen className="w-4 h-4 shrink-0" />
+          <span>Teacher Login</span>
+        </button>
+      </div>
 
-          <div className="space-y-3 pt-1">
-            <button
-              type="button"
-              onClick={() => { setSelectedPortal('student'); setError(null); }}
-              className="w-full clay-card p-3.5 sm:p-4 flex items-center justify-between text-left hover:border-purple-500/40 transition-all min-h-[58px]"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-purple-100 text-[#7C3AED] flex items-center justify-center shrink-0">
-                  <GraduationCap className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-heading font-bold text-sm text-[#332F3A]">Student Portal</h3>
-                  <p className="text-[11px] sm:text-xs text-[#635F69]">Enter test code, take exams, and view scores</p>
-                </div>
-              </div>
-              <ArrowRight className="w-4 h-4 text-[#7C3AED] shrink-0" />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => { setSelectedPortal('teacher'); setError(null); }}
-              className="w-full clay-card p-3.5 sm:p-4 flex items-center justify-between text-left hover:border-purple-500/40 transition-all min-h-[58px]"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-pink-100 text-[#DB2777] flex items-center justify-center shrink-0">
-                  <BookOpen className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-heading font-bold text-sm text-[#332F3A]">Teacher Portal</h3>
-                  <p className="text-[11px] sm:text-xs text-[#635F69]">Faculty access for tests & question bank</p>
-                </div>
-              </div>
-              <ArrowRight className="w-4 h-4 text-[#DB2777] shrink-0" />
-            </button>
-          </div>
-        </Card>
+      {error && (
+        <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-800 text-xs rounded-xl flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+          <span>{error}</span>
+        </div>
       )}
 
-      {/* 2. Student Authentication Flow */}
+      {/* STUDENT PORTAL FORM */}
       {selectedPortal === 'student' && (
-        <Card variant="elevated" padding="md" className="space-y-3.5 sm:space-y-4">
-          <div className="flex items-center justify-between">
-            {!isModal ? (
-              <button
-                type="button"
-                onClick={() => { setSelectedPortal('landing'); setError(null); }}
-                className="inline-flex items-center gap-1 text-xs font-heading font-bold text-[#635F69] hover:text-[#7C3AED] py-1"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" />
-                <span>Portals</span>
-              </button>
-            ) : (
-              <div className="flex items-center gap-1.5 text-xs font-heading font-bold text-[#7C3AED]">
-                <GraduationCap className="w-4 h-4" />
-                <span>Student Access</span>
-              </div>
-            )}
-            <span className="text-[11px] font-heading font-extrabold uppercase tracking-wider text-[#7C3AED] bg-purple-50 px-2 py-0.5 rounded-md border border-purple-100">
-              {studentMode === 'register' ? 'New Registration' : 'Student Login'}
-            </span>
-          </div>
-
+        <div className="space-y-3.5">
           {/* Toggle Login vs Register */}
           <div className="grid grid-cols-2 p-1 bg-gray-100 rounded-2xl border border-gray-200 text-xs font-heading font-bold">
             <button
               type="button"
               onClick={() => { setStudentMode('login'); setError(null); }}
               className={`py-2 rounded-xl transition-all ${
-                studentMode === 'login' ? 'bg-white text-[#7C3AED] shadow-xs' : 'text-[#635F69] hover:text-[#332F3A]'
+                studentMode === 'login' ? 'bg-white text-[#7C3AED] shadow-xs' : 'text-[#635F69]'
               }`}
             >
-              Sign In
+              Student Login
             </button>
             <button
               type="button"
               onClick={() => { setStudentMode('register'); setError(null); }}
               className={`py-2 rounded-xl transition-all ${
-                studentMode === 'register' ? 'bg-white text-[#7C3AED] shadow-xs' : 'text-[#635F69] hover:text-[#332F3A]'
+                studentMode === 'register' ? 'bg-white text-[#7C3AED] shadow-xs' : 'text-[#635F69]'
               }`}
             >
-              Register First
+              First-Time Register
             </button>
           </div>
-
-          {error && (
-            <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-800 text-xs rounded-xl flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-              <span>{error}</span>
-            </div>
-          )}
 
           <form onSubmit={handleStudentSubmit} className="space-y-3">
             {studentMode === 'register' && (
@@ -291,7 +266,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
             )}
 
             <Input
-              label="Email Address"
+              label="Student Email Address"
               type="email"
               placeholder="student@example.com"
               value={email}
@@ -313,8 +288,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
               required
             />
 
-            {/* Prominent, touch-friendly submit button */}
-            <div className="pt-2 pb-1">
+            <div className="pt-2">
               <Button
                 type="submit"
                 variant="primary"
@@ -327,33 +301,23 @@ export const LoginView: React.FC<LoginViewProps> = ({
               </Button>
             </div>
           </form>
-        </Card>
+
+          {/* Quick link to Teacher */}
+          <div className="text-center pt-1 border-t border-gray-100">
+            <button
+              type="button"
+              onClick={() => { setSelectedPortal('teacher'); setError(null); }}
+              className="text-xs text-[#635F69] hover:text-[#DB2777] font-medium transition-colors"
+            >
+              Are you an educator? <strong className="text-[#DB2777]">Switch to Teacher Login →</strong>
+            </button>
+          </div>
+        </div>
       )}
 
-      {/* 3. Teacher Portal: Isolated Multi-Teacher Authentication */}
+      {/* TEACHER PORTAL FORM */}
       {selectedPortal === 'teacher' && (
-        <Card variant="elevated" padding="md" className="space-y-3.5 sm:space-y-4">
-          <div className="flex items-center justify-between">
-            {!isModal ? (
-              <button
-                type="button"
-                onClick={() => { setSelectedPortal('landing'); setError(null); }}
-                className="inline-flex items-center gap-1 text-xs font-heading font-bold text-[#635F69] hover:text-[#7C3AED] py-1"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" />
-                <span>Portals</span>
-              </button>
-            ) : (
-              <div className="flex items-center gap-1.5 text-xs font-heading font-bold text-[#DB2777]">
-                <BookOpen className="w-4 h-4" />
-                <span>Faculty Access</span>
-              </div>
-            )}
-            <span className="text-[11px] font-heading font-extrabold uppercase tracking-wider text-[#DB2777] bg-pink-50 px-2 py-0.5 rounded-md border border-pink-100">
-              Teacher Portal
-            </span>
-          </div>
-
+        <div className="space-y-3.5">
           {/* Toggle Login vs Register */}
           <div className="grid grid-cols-2 p-1 bg-gray-100 rounded-2xl border border-gray-200 text-xs font-heading font-bold">
             <button
@@ -372,16 +336,9 @@ export const LoginView: React.FC<LoginViewProps> = ({
                 teacherMode === 'register' ? 'bg-white text-[#DB2777] shadow-xs' : 'text-[#635F69]'
               }`}
             >
-              New Teacher
+              New Teacher Register
             </button>
           </div>
-
-          {error && (
-            <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-800 text-xs rounded-xl flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-              <span>{error}</span>
-            </div>
-          )}
 
           <form onSubmit={handleTeacherSubmit} className="space-y-3">
             {teacherMode === 'register' && (
@@ -398,9 +355,10 @@ export const LoginView: React.FC<LoginViewProps> = ({
 
                 <Input
                   label="Institution / Department (Optional)"
-                  placeholder="e.g. Department of Physics"
+                  placeholder="e.g. Dept. of Physics / KV Delhi"
                   value={schoolName}
                   onChange={e => setSchoolName(e.target.value)}
+                  leftIcon={<Building className="w-4 h-4" />}
                 />
               </>
             )}
@@ -408,7 +366,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
             <Input
               label="Teacher Email Address"
               type="email"
-              placeholder="teacher@example.com"
+              placeholder="teacher@institution.edu"
               value={email}
               onChange={e => setEmail(e.target.value)}
               leftIcon={<Mail className="w-4 h-4" />}
@@ -441,39 +399,54 @@ export const LoginView: React.FC<LoginViewProps> = ({
               />
             )}
 
-            <div className="pt-2 pb-1">
+            <div className="pt-2">
               <Button
                 type="submit"
                 variant="primary"
                 fullWidth
                 size="lg"
-                className="py-3 text-sm font-bold shadow-md active:scale-[0.99] min-h-[46px]"
+                className="py-3 text-sm font-bold shadow-md bg-gradient-to-r from-[#DB2777] to-[#BE185D] hover:from-[#BE185D] hover:to-[#9D174D] active:scale-[0.99] min-h-[46px]"
                 isLoading={isLoading}
               >
-                {teacherMode === 'register' ? 'Create Teacher Account' : 'Sign In as Faculty'}
+                {teacherMode === 'register' ? 'Create Teacher Workspace →' : 'Sign In as Faculty →'}
               </Button>
             </div>
           </form>
-        </Card>
+
+          {/* Quick link to Student */}
+          <div className="text-center pt-1 border-t border-gray-100">
+            <button
+              type="button"
+              onClick={() => { setSelectedPortal('student'); setError(null); }}
+              className="text-xs text-[#635F69] hover:text-[#7C3AED] font-medium transition-colors"
+            >
+              Taking an exam as a Student? <strong className="text-[#7C3AED]">Switch to Student Portal →</strong>
+            </button>
+          </div>
+        </div>
       )}
-    </div>
+    </Card>
   );
 
   // If rendered as a Modal
   if (isModal) {
     return (
-      <div className="bg-white rounded-[24px] sm:rounded-[28px] shadow-2xl border border-purple-500/10 w-full flex flex-col overflow-hidden max-h-[88vh]">
+      <div className="bg-white rounded-[24px] sm:rounded-[28px] shadow-2xl border border-purple-500/10 w-full flex flex-col overflow-hidden max-h-[90vh]">
         {/* Modal Top Header with Close Button */}
         <div className="flex items-center justify-between px-4 py-3 sm:px-5 sm:py-3.5 border-b border-gray-100 bg-[#FAF8FE] shrink-0">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-purple-100 text-[#7C3AED] flex items-center justify-center font-heading font-black text-sm">
+            <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-heading font-black text-sm text-white ${
+              selectedPortal === 'teacher' ? 'bg-[#DB2777]' : 'bg-[#7C3AED]'
+            }`}>
               T
             </div>
             <div>
               <h2 className="text-sm font-heading font-black text-[#332F3A]">
-                {studentMode === 'register' ? 'Student Registration' : 'Student Login'}
+                {selectedPortal === 'teacher' ? 'Faculty Authentication' : 'Student Authentication'}
               </h2>
-              <p className="text-[10px] text-[#635F69]">Quick sign-in to start your exam</p>
+              <p className="text-[10px] text-[#635F69]">
+                {selectedPortal === 'teacher' ? 'Access your teacher workspace' : 'Quick sign-in to start your exam'}
+              </p>
             </div>
           </div>
           {onClose && (
@@ -490,7 +463,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
 
         {/* Scrollable Form Body */}
         <div className="overflow-y-auto px-4 py-4 sm:px-6 sm:py-5 overscroll-contain flex-1">
-          {formContent}
+          {formCard}
         </div>
       </div>
     );
@@ -501,12 +474,16 @@ export const LoginView: React.FC<LoginViewProps> = ({
     <div className="min-h-screen bg-[#F4F1FA] flex flex-col justify-start sm:justify-center py-4 sm:py-8 px-3 sm:px-6 lg:px-8 overflow-y-auto">
       {/* Brand Header */}
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center space-y-1.5 sm:space-y-2 pt-2 sm:pt-0">
-        <div className="w-11 h-11 sm:w-14 sm:h-14 rounded-2xl sm:rounded-3xl bg-gradient-to-tr from-[#7C3AED] to-[#8B5CF6] flex items-center justify-center text-white mx-auto shadow-md">
+        <div className={`w-11 h-11 sm:w-14 sm:h-14 rounded-2xl sm:rounded-3xl flex items-center justify-center text-white mx-auto shadow-md transition-colors ${
+          selectedPortal === 'teacher'
+            ? 'bg-gradient-to-tr from-[#DB2777] to-[#EC4899]'
+            : 'bg-gradient-to-tr from-[#7C3AED] to-[#8B5CF6]'
+        }`}>
           <span className="font-heading font-black text-xl sm:text-2xl">T</span>
         </div>
 
         <h1 className="text-2xl sm:text-3xl font-heading font-black text-[#332F3A] tracking-tight">
-          Testify<span className="text-[#7C3AED]">Me</span>
+          Testify<span className={selectedPortal === 'teacher' ? 'text-[#DB2777]' : 'text-[#7C3AED]'}>Me</span>
         </h1>
         <p className="text-xs text-[#635F69] max-w-xs mx-auto">
           Private, secure examination platform for educators & students.
@@ -514,7 +491,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
       </div>
 
       <div className="mt-3.5 sm:mt-6 sm:mx-auto sm:w-full sm:max-w-md pb-8">
-        {formContent}
+        {formCard}
       </div>
     </div>
   );

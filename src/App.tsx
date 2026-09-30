@@ -74,10 +74,10 @@ export function App() {
   }, [currentPath]);
 
   // UNAUTHORIZED TEACHER ACCESS CHECK (Requirements 4 & 5)
-  // If user navigates to /teacher without authenticated faculty educator credentials
+  // If user navigates to /teacher while logged in as a student
   const isTeacherRoute = currentPath === '/teacher' || currentPath.startsWith('/teacher/');
 
-  if (isTeacherRoute && (!currentUser || currentUser.role !== 'teacher')) {
+  if (isTeacherRoute && currentUser && currentUser.role !== 'teacher') {
     return (
       <div className="min-h-screen bg-[#F4F1FA] flex items-center justify-center p-4">
         <Card variant="elevated" padding="lg" className="max-w-md w-full text-center space-y-4">
