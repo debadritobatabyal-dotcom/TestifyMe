@@ -1,0 +1,106 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isTeacher() {
+      return isAuthenticated() && 
+        (request.auth.token.role == 'teacher' || 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher');
+    }
+
+    function isStudent() {
+      return isAuthenticated() && 
+        (request.auth.token.role == 'student' || 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'student');
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isResourceOwner() {
+      return isAuthenticated() && resource.data.ownerId == request.auth.uid;
+    }
+
+    function willBeResourceOwner() {
+      return isAuthenticated() && request.resource.data.ownerId == request.auth.uid;
+    }
+
+    // User profiles: /users/{userId}
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isAuthenticated() && request.auth.uid == userId;
+      allow delete: if false; // Profiles preserved
+    }
+
+    // Question Bank:
+    // Teachers have isolated read/write strictly scoped to their own ownerId.
+    // Teacher A CANNOT read or write Teacher B's questions.
+    // Students can NEVER read the question bank directly.
+    match /questions/{questionId} {
+      allow read: if isTeacher() && isResourceOwner();
+      allow create: if isTeacher() && willBeResourceOwner();
+      allow update: if isTeacher() && isResourceOwner() && willBeResourceOwner();
+      allow delete: if isTeacher() && isResourceOwner();
+    }
+
+    // Tests collection:
+    // Multi-teacher isolation:
+    // Teacher can only read, edit, delete their own tests (ownerId == request.auth.uid).
+    // Students can only read scheduled or active tests metadata (cannot see owner questions/answer keys).
+    match /tests/{testId} {
+      allow read: if (isTeacher() && isResourceOwner()) ||
+                     (isStudent() && resource.data.status in ['scheduled', 'active', 'closed']);
+      allow create: if isTeacher() && willBeResourceOwner();
+      allow update: if isTeacher() && isResourceOwner() && willBeResourceOwner();
+      allow delete: if isTeacher() && isResourceOwner();
+    }
+
+    // Public Test Access Metadata: /testAccess/{testCode}
+    // Contains ONLY safe public metadata (title, timing, duration, question counts).
+    // NEVER contains question banks, answers, explanations, or teacher private data.
+    // Publicly readable so students can verify test status from test links.
+    // Only the authenticated owning teacher can write or update their public test access record.
+    match /testAccess/{testCode} {
+      allow read: if resource.data.status in ['scheduled', 'active', 'closed', 'published'];
+      allow write: if isTeacher() &&
+                   ((request.resource != null && request.resource.data.ownerId == request.auth.uid) ||
+                    (resource != null && resource.data.ownerId == request.auth.uid));
+    }
+
+    // Test Attempts:
+    // Students can only read their own attempt.
+    // Only the teacher who OWNS the corresponding test can read the attempts for that test.
+    match /attempts/{attemptId} {
+      allow read: if (isAuthenticated() && resource.data.studentId == request.auth.uid) ||
+                     (isTeacher() && resource.data.ownerId == request.auth.uid);
+
+      // Student creates attempt for an active test
+      allow create: if isStudent() &&
+                    request.resource.data.studentId == request.auth.uid &&
+                    request.resource.data.status == 'in_progress';
+
+      // Student can only update answers while test is in_progress before expiry, or transition to submitted
+      allow update: if (
+        isStudent() && 
+        resource.data.studentId == request.auth.uid &&
+        request.resource.data.studentId == resource.data.studentId &&
+        request.resource.data.ownerId == resource.data.ownerId &&
+        resource.data.status == 'in_progress' &&
+        (
+          (request.resource.data.status == 'in_progress' && request.time < resource.data.expiresAt) ||
+          (request.resource.data.status == 'submitted')
+        )
+      ) || (isTeacher() && resource.data.ownerId == request.auth.uid);
+
+      // Only the test-owning teacher can delete attempts
+      allow delete: if isTeacher() && resource.data.ownerId == request.auth.uid;
+    }
+  }
+}

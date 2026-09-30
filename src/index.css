@@ -1,0 +1,181 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-heading: 'Nunito', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-body: 'DM Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    
+    --bg-main: #F4F1FA;
+    --text-primary: #332F3A;
+    --text-secondary: #635F69;
+    --color-primary: #7C3AED;
+    --color-secondary: #DB2777;
+    --color-info: #0EA5E9;
+    --color-success: #10B981;
+    --color-warning: #F59E0B;
+  }
+
+  body {
+    font-family: var(--font-body);
+    color: var(--text-primary);
+    background-color: var(--bg-main);
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+  }
+}
+
+/* Claymorphism Restrained Utilities */
+.clay-card {
+  background: #ffffff;
+  border-radius: 24px;
+  box-shadow: 
+    0 12px 30px -10px rgba(124, 58, 237, 0.08),
+    0 4px 12px -2px rgba(51, 47, 58, 0.04),
+    inset 0 1px 1px rgba(255, 255, 255, 0.9),
+    inset 0 -2px 4px rgba(124, 58, 237, 0.03);
+  border: 1px solid rgba(124, 58, 237, 0.08);
+}
+
+.clay-card-flat {
+  background: #ffffff;
+  border-radius: 20px;
+  box-shadow: 
+    0 4px 14px -2px rgba(51, 47, 58, 0.05),
+    inset 0 1px 1px rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(99, 95, 105, 0.1);
+}
+
+.clay-button-primary {
+  background: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%);
+  color: #ffffff;
+  border-radius: 18px;
+  font-family: var(--font-heading);
+  font-weight: 700;
+  box-shadow: 
+    0 8px 20px -4px rgba(124, 58, 237, 0.35),
+    inset 0 2px 2px rgba(255, 255, 255, 0.3),
+    inset 0 -2px 4px rgba(91, 33, 182, 0.3);
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  min-height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.clay-button-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 
+    0 12px 24px -4px rgba(124, 58, 237, 0.45),
+    inset 0 2px 2px rgba(255, 255, 255, 0.4);
+}
+
+.clay-button-primary:active {
+  transform: translateY(1px);
+  box-shadow: 
+    0 4px 10px -2px rgba(124, 58, 237, 0.3),
+    inset 0 2px 4px rgba(91, 33, 182, 0.4);
+}
+
+.clay-button-secondary {
+  background: #ffffff;
+  color: #332F3A;
+  border-radius: 18px;
+  font-family: var(--font-heading);
+  font-weight: 700;
+  box-shadow: 
+    0 4px 12px -2px rgba(51, 47, 58, 0.06),
+    inset 0 1px 1px rgba(255, 255, 255, 0.9),
+    inset 0 -2px 3px rgba(0, 0, 0, 0.03);
+  border: 1px solid rgba(99, 95, 105, 0.15);
+  transition: all 0.15s ease;
+  min-height: 44px;
+}
+
+.clay-button-secondary:hover {
+  background: #FAF8FD;
+  border-color: rgba(124, 58, 237, 0.3);
+  color: #7C3AED;
+}
+
+.clay-button-secondary:active {
+  transform: translateY(1px);
+}
+
+.clay-input {
+  background: #ffffff;
+  border-radius: 16px;
+  border: 1.5px solid rgba(99, 95, 105, 0.2);
+  color: #332F3A;
+  font-family: var(--font-body);
+  box-shadow: inset 0 2px 4px rgba(51, 47, 58, 0.03);
+  transition: all 0.15s ease;
+  min-height: 44px;
+}
+
+.clay-input:focus {
+  outline: none;
+  border-color: #7C3AED;
+  box-shadow: 
+    0 0 0 4px rgba(124, 58, 237, 0.12),
+    inset 0 1px 2px rgba(51, 47, 58, 0.02);
+}
+
+/* Question Option Card - Touch friendly with clay state */
+.clay-option-card {
+  background: #ffffff;
+  border-radius: 20px;
+  border: 2px solid rgba(99, 95, 105, 0.12);
+  box-shadow: 
+    0 4px 12px -2px rgba(51, 47, 58, 0.04),
+    inset 0 1px 1px rgba(255, 255, 255, 0.9);
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  min-height: 52px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.clay-option-card:hover {
+  border-color: rgba(124, 58, 237, 0.35);
+  background: #FAF8FE;
+}
+
+.clay-option-card.selected {
+  border-color: #7C3AED;
+  background: #F3EEFC;
+  box-shadow: 
+    0 6px 18px -4px rgba(124, 58, 237, 0.2),
+    inset 0 1px 1px rgba(255, 255, 255, 0.9);
+}
+
+/* Touch targets guarantee >= 44px */
+button, a, input, select, textarea {
+  min-height: 44px;
+}
+
+/* Reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Smooth minimal scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(124, 58, 237, 0.2);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(124, 58, 237, 0.4);
+}
