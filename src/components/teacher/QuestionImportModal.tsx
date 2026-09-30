@@ -18,6 +18,7 @@ export interface QuestionImportModalProps {
   isOpen: boolean;
   onClose: () => void;
   onQuestionsExtracted: (report: ParseReport) => void;
+  teacherId?: string;
 }
 
 type ImportMethod = 'pdf' | 'text' | 'csv' | 'excel';
@@ -26,6 +27,7 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
   isOpen,
   onClose,
   onQuestionsExtracted,
+  teacherId,
 }) => {
   const [method, setMethod] = useState<ImportMethod>('pdf');
   const [pastedText, setPastedText] = useState<string>('');
@@ -46,7 +48,8 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
       const report = await QuestionParserService.parsePDFFile(
         file,
         status => setProgressStatus(status),
-        subject
+        subject,
+        teacherId
       );
 
       if (report.candidates.length === 0) {
@@ -74,7 +77,7 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
     setErrorMessage(null);
 
     try {
-      const report = await QuestionParserService.parseExcelFile(file, subject);
+      const report = await QuestionParserService.parseExcelFile(file, subject, teacherId);
       if (report.candidates.length === 0) {
         setErrorMessage('No valid rows found in the uploaded Excel spreadsheet.');
         setIsProcessing(false);
@@ -102,7 +105,7 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
     reader.onload = event => {
       try {
         const text = event.target?.result as string;
-        const report = QuestionParserService.parseRawText(text, subject);
+        const report = QuestionParserService.parseRawText(text, subject, teacherId);
         if (report.candidates.length === 0) {
           setErrorMessage('No recognizable questions found in CSV.');
           setIsProcessing(false);
@@ -130,7 +133,7 @@ export const QuestionImportModal: React.FC<QuestionImportModalProps> = ({
     setErrorMessage(null);
 
     try {
-      const report = QuestionParserService.parseRawText(pastedText, subject);
+      const report = QuestionParserService.parseRawText(pastedText, subject, teacherId);
       if (report.candidates.length === 0) {
         setErrorMessage('Could not detect distinct question blocks. Ensure each question starts with a number or "Question" keyword.');
         setIsProcessing(false);

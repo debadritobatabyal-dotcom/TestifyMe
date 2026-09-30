@@ -519,6 +519,7 @@ export const QuestionBankManager: React.FC<QuestionBankManagerProps> = ({ teache
       <QuestionImportModal
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
+        teacherId={teacher.id}
         onQuestionsExtracted={report => {
           setStagingReport(report);
         }}

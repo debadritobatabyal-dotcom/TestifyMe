@@ -18,7 +18,7 @@ export const ASSERTION_REASON_OPTIONS = [
 
 export const QuestionParserService = {
   // 1. Parse from Raw Text (Pasted Text or Extracted from PDF)
-  parseRawText(rawText: string, defaultSubject: string = 'General'): ParseReport {
+  parseRawText(rawText: string, defaultSubject: string = 'General', teacherId?: string): ParseReport {
     const candidates: ImportedQuestionCandidate[] = [];
 
     // Check for answer key block at end of text (e.g., "Answer Key: 1-A 2-B 3-C" or "1. A, 2. B")
@@ -27,7 +27,8 @@ export const QuestionParserService = {
     // Split text into question blocks based on common question headers
     const blocks = splitIntoQuestionBlocks(cleanText);
 
-    const existingQuestions = Storage.getQuestions();
+    const currentTeacherId = teacherId || Storage.getCurrentUser()?.id;
+    const existingQuestions = currentTeacherId ? Storage.getQuestions(currentTeacherId) : [];
     const existingTexts = new Set(existingQuestions.map(q => q.questionText.trim().toLowerCase()));
     let duplicateCount = 0;
 
@@ -37,8 +38,9 @@ export const QuestionParserService = {
         const norm = (candidate.questionText || candidate.assertion || '').trim().toLowerCase();
         if (existingTexts.has(norm)) {
           duplicateCount++;
-          candidate.isValid = false;
-          candidate.validationMessage = 'Duplicate: Question already exists in Question Bank.';
+          if (!candidate.validationMessage) {
+            candidate.validationMessage = 'Notice: Question already in your Question Bank (will create copy).';
+          }
         }
         candidates.push(candidate);
       }
@@ -60,7 +62,8 @@ export const QuestionParserService = {
   async parsePDFFile(
     file: File,
     onProgress?: (status: string) => void,
-    defaultSubject: string = 'General'
+    defaultSubject: string = 'General',
+    teacherId?: string
   ): Promise<ParseReport> {
     onProgress?.('Reading PDF file structure...');
     const arrayBuffer = await file.arrayBuffer();
@@ -114,11 +117,11 @@ export const QuestionParserService = {
     }
 
     onProgress?.('Parsing and structuring question blocks...');
-    return this.parseRawText(fullText, defaultSubject);
+    return this.parseRawText(fullText, defaultSubject, teacherId);
   },
 
   // 3. Parse from Excel File (.xlsx/.xls)
-  async parseExcelFile(file: File, defaultSubject: string = 'General'): Promise<ParseReport> {
+  async parseExcelFile(file: File, defaultSubject: string = 'General', teacherId?: string): Promise<ParseReport> {
     const data = await file.arrayBuffer();
     const workbook = XLSX.read(data);
     const firstSheetName = workbook.SheetNames[0];
@@ -137,7 +140,8 @@ export const QuestionParserService = {
 
     const headers = (json[0] as string[]).map(h => (h || '').toString().toLowerCase().trim());
     const candidates: ImportedQuestionCandidate[] = [];
-    const existingQuestions = Storage.getQuestions();
+    const currentTeacherId = teacherId || Storage.getCurrentUser()?.id;
+    const existingQuestions = currentTeacherId ? Storage.getQuestions(currentTeacherId) : [];
     const existingTexts = new Set(existingQuestions.map(q => q.questionText.trim().toLowerCase()));
     let duplicateCount = 0;
 
@@ -198,8 +202,9 @@ export const QuestionParserService = {
       const norm = (questionText || assertion).trim().toLowerCase();
       if (existingTexts.has(norm)) {
         duplicateCount++;
-        isValid = false;
-        validationMessage = 'Duplicate: Question already exists in Question Bank.';
+        if (!validationMessage) {
+          validationMessage = 'Notice: Question already in your Question Bank (will create copy).';
+        }
       }
 
       candidates.push({

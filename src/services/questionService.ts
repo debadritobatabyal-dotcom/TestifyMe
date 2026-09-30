@@ -101,7 +101,7 @@ export const QuestionService = {
 
     // Parse header
     const headers = parseCSVLine(lines[0]).map(h => h.toLowerCase().trim());
-    const existingQuestions = Storage.getQuestions();
+    const existingQuestions = ownerId ? Storage.getQuestions(ownerId) : [];
     const existingTexts = new Set(existingQuestions.map(q => q.questionText.trim().toLowerCase()));
     const seenIncomingTexts = new Set<string>();
 
@@ -160,10 +160,13 @@ export const QuestionService = {
       }
 
       const normalizedText = (questionText || assertion).trim().toLowerCase();
-      if (existingTexts.has(normalizedText) || seenIncomingTexts.has(normalizedText)) {
+      if (seenIncomingTexts.has(normalizedText)) {
         duplicateCount++;
-        invalidRows.push({ rowNumber, reason: 'Duplicate question text already exists in database or CSV', raw: row });
+        invalidRows.push({ rowNumber, reason: 'Duplicate question text already appears earlier in this CSV file', raw: row });
         continue;
+      }
+      if (existingTexts.has(normalizedText)) {
+        duplicateCount++;
       }
       seenIncomingTexts.add(normalizedText);
 
