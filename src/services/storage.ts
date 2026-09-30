@@ -304,45 +304,7 @@ export const Storage = {
     const local = this.getTestByAccessCode(cleanCode);
     if (local && local.questions && local.questions.length > 0) return local;
 
-    // 2. Local dev server sync API for cross-browser / separate incognito / Safari
-    try {
-      if (typeof window !== 'undefined' && typeof window.fetch === 'function') {
-        const fullRes = await fetch(`/api/tests/code/${encodeURIComponent(cleanCode)}`);
-        const fullContentType = fullRes.headers?.get('content-type') || '';
-        if (fullRes.ok && fullContentType.includes('application/json')) {
-          const fullTest: Test = await fullRes.json();
-          if (fullTest && fullTest.id) {
-            this.saveTest(fullTest);
-            return fullTest;
-          }
-        }
-
-        const res = await fetch(`/api/test-access/${encodeURIComponent(cleanCode)}`);
-        const resContentType = res.headers?.get('content-type') || '';
-        if (res.ok && resContentType.includes('application/json')) {
-          const pub: PublicTestAccess = await res.json();
-          if (pub && (pub.testCode || pub.accessCode)) {
-            this.savePublicTest(pub);
-            if (pub.testId) {
-              const testRes = await fetch(`/api/tests/${encodeURIComponent(pub.testId)}`);
-              const testContentType = testRes.headers?.get('content-type') || '';
-              if (testRes.ok && testContentType.includes('application/json')) {
-                const fetchedTest: Test = await testRes.json();
-                if (fetchedTest && fetchedTest.id) {
-                  this.saveTest(fetchedTest);
-                  return fetchedTest;
-                }
-              }
-            }
-            return this.getTestByAccessCode(cleanCode);
-          }
-        }
-      }
-    } catch {
-      // Dev server fetch failed, continue to Firestore
-    }
-
-    // 3. Cloud Firestore resolution (if configured)
+    // 2. Cloud Firestore resolution (primary path in production)
     if (db) {
       try {
         const docSnap = await getDoc(doc(db, 'testAccess', cleanCode));
@@ -367,6 +329,46 @@ export const Storage = {
         }
       } catch (err: any) {
         console.warn(`[TEST] Cloud Firestore test resolution error: code=${err?.code}, message=${err?.message}`);
+      }
+    }
+
+    // 3. Fallback: Local dev server sync API (only used in local dev when Firestore is not configured)
+    if (!db) {
+      try {
+        if (typeof window !== 'undefined' && typeof window.fetch === 'function') {
+          const fullRes = await fetch(`/api/tests/code/${encodeURIComponent(cleanCode)}`);
+          const fullContentType = fullRes.headers?.get('content-type') || '';
+          if (fullRes.ok && fullContentType.includes('application/json')) {
+            const fullTest: Test = await fullRes.json();
+            if (fullTest && fullTest.id) {
+              this.saveTest(fullTest);
+              return fullTest;
+            }
+          }
+
+          const res = await fetch(`/api/test-access/${encodeURIComponent(cleanCode)}`);
+          const resContentType = res.headers?.get('content-type') || '';
+          if (res.ok && resContentType.includes('application/json')) {
+            const pub: PublicTestAccess = await res.json();
+            if (pub && (pub.testCode || pub.accessCode)) {
+              this.savePublicTest(pub);
+              if (pub.testId) {
+                const testRes = await fetch(`/api/tests/${encodeURIComponent(pub.testId)}`);
+                const testContentType = testRes.headers?.get('content-type') || '';
+                if (testRes.ok && testContentType.includes('application/json')) {
+                  const fetchedTest: Test = await testRes.json();
+                  if (fetchedTest && fetchedTest.id) {
+                    this.saveTest(fetchedTest);
+                    return fetchedTest;
+                  }
+                }
+              }
+              return this.getTestByAccessCode(cleanCode);
+            }
+          }
+        }
+      } catch {
+        // Dev server fetch failed
       }
     }
 
