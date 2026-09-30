@@ -714,57 +714,68 @@ export const Storage = {
   // Sync all local data to Firestore (fixes tests created before Firebase was configured)
   syncAllToFirestore(): void {
     if (!db) return;
-    const firestore = db; // non-null reference for TypeScript
+    const firestore = db;
 
     console.log('[TestifyMe] Syncing all local data to Firestore...');
 
-    // Sync all tests + their public access metadata
+    // Firestore rejects undefined — recursively strip them
+    const clean = (obj: any): any => {
+      if (obj === null || obj === undefined) return null;
+      if (Array.isArray(obj)) return obj.map(clean);
+      if (typeof obj === 'object' && !(obj instanceof Date)) {
+        const result: any = {};
+        for (const [k, v] of Object.entries(obj)) {
+          if (v !== undefined) result[k] = clean(v);
+        }
+        return result;
+      }
+      return obj;
+    };
+
     const tests = this.getTests();
     tests.forEach(test => {
       const testCode = (test.testCode || test.accessCode || '').trim().toUpperCase();
       if (test.id) {
-        setDoc(doc(firestore, 'tests', test.id), test, { merge: true }).catch(() => {});
+        setDoc(doc(firestore, 'tests', test.id), clean(test), { merge: true }).catch(() => {});
       }
       if (testCode) {
-        const publicAccess = {
+        const publicAccess = clean({
           testId: test.id,
           testCode,
           accessCode: testCode,
-          name: test.name,
-          title: test.name,
-          description: test.description,
-          status: test.status,
-          durationMinutes: test.durationMinutes,
-          startTime: test.startTime,
-          endTime: test.endTime,
-          totalQuestions: test.totalQuestions,
-          assertionReasonCount: test.assertionReasonCount,
-          mcqCount: test.mcqCount,
-          positiveMarks: test.positiveMarks,
-          negativeMarkingEnabled: test.negativeMarkingEnabled,
-          negativeMarks: test.negativeMarks,
-          negativeMarking: test.negativeMarking,
+          name: test.name || 'Examination',
+          title: test.name || 'Examination',
+          description: test.description || '',
+          status: test.status || 'scheduled',
+          durationMinutes: test.durationMinutes || 40,
+          startTime: test.startTime || 0,
+          endTime: test.endTime || 0,
+          totalQuestions: test.totalQuestions || 40,
+          assertionReasonCount: test.assertionReasonCount || 5,
+          mcqCount: test.mcqCount || 35,
+          positiveMarks: test.positiveMarks || 1,
+          negativeMarkingEnabled: test.negativeMarkingEnabled ?? true,
+          negativeMarks: test.negativeMarks ?? 0.25,
+          negativeMarking: test.negativeMarking ?? 0,
           isPublished: test.isPublished ?? (test.status !== 'draft'),
-          ownerId: test.ownerId,
-          createdAt: test.createdAt,
-        };
+          ownerId: test.ownerId || '',
+          createdAt: test.createdAt || Date.now(),
+        });
         setDoc(doc(firestore, 'testAccess', testCode), publicAccess, { merge: true }).catch(() => {});
       }
     });
 
-    // Sync all questions
     const questions = this.getQuestions();
     questions.forEach(q => {
       if (q.id) {
-        setDoc(doc(firestore, 'questions', q.id), q, { merge: true }).catch(() => {});
+        setDoc(doc(firestore, 'questions', q.id), clean(q), { merge: true }).catch(() => {});
       }
     });
 
-    // Sync all attempts
     const attempts = this.getAttempts();
     attempts.forEach(att => {
       if (att.id) {
-        setDoc(doc(firestore, 'attempts', att.id), att, { merge: true }).catch(() => {});
+        setDoc(doc(firestore, 'attempts', att.id), clean(att), { merge: true }).catch(() => {});
       }
     });
 
@@ -774,7 +785,7 @@ export const Storage = {
 
 // Auto-sync localStorage → Firestore on app startup (one-time push for existing data)
 if (db && typeof window !== 'undefined') {
-  const syncKey = 'testifyme_firestore_synced_v1';
+  const syncKey = 'testifyme_firestore_synced_v2';
   if (!safeStorage.getItem(syncKey)) {
     // Delay to let app initialize first
     setTimeout(() => {
