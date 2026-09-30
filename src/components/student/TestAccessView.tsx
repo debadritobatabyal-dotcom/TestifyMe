@@ -4,7 +4,7 @@ import { TestService } from '../../services/testService';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
-import { Clock, HelpCircle, ShieldAlert, ArrowLeft, Play, Calendar, AlertCircle, EyeOff, Lock } from 'lucide-react';
+import { Clock, HelpCircle, ShieldAlert, ArrowLeft, Play, Calendar, AlertCircle, EyeOff, Lock, RefreshCw } from 'lucide-react';
 
 export interface TestAccessViewProps {
   testCode: string;
@@ -24,6 +24,7 @@ export const TestAccessView: React.FC<TestAccessViewProps> = ({
   const [test, setTest] = useState<Test | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [retryTrigger, setRetryTrigger] = useState<number>(0);
 
   const cleanCode = (testCode || '').trim().toUpperCase();
 
@@ -34,7 +35,7 @@ export const TestAccessView: React.FC<TestAccessViewProps> = ({
 
     // 1. Immediate synchronous check
     const local = TestService.getTestByAccessCode(cleanCode);
-    if (local) {
+    if (local && local.questions && local.questions.length > 0) {
       setTest(local);
       setLoading(false);
       return;
@@ -49,19 +50,19 @@ export const TestAccessView: React.FC<TestAccessViewProps> = ({
           setTest(res.test);
           setError(null);
         } else {
-          setError('Test not found. Please check the test code with your teacher.');
+          setError(res.error || 'Test not found. Please check the test code with your teacher.');
         }
       })
-      .catch(() => {
+      .catch((err: any) => {
         if (!isMounted) return;
         setLoading(false);
-        setError('Test not found. Please check the test code with your teacher.');
+        setError(err?.message || 'Test not found. Please check the test code with your teacher.');
       });
 
     return () => {
       isMounted = false;
     };
-  }, [cleanCode]);
+  }, [cleanCode, retryTrigger]);
 
   // Loading state
   if (loading) {
@@ -72,7 +73,7 @@ export const TestAccessView: React.FC<TestAccessViewProps> = ({
             <Clock className="w-6 h-6" />
           </div>
           <h2 className="text-lg font-heading font-extrabold text-[#332F3A]">Resolving Examination...</h2>
-          <p className="text-xs text-[#635F69]">Looking up test code "{cleanCode}" with faculty registry...</p>
+          <p className="text-xs text-[#635F69]">Looking up test code "{cleanCode}" in cloud registry...</p>
         </Card>
       </div>
     );
@@ -88,14 +89,24 @@ export const TestAccessView: React.FC<TestAccessViewProps> = ({
           </div>
           <h2 className="text-xl font-heading font-extrabold text-[#332F3A]">Test Code Not Found</h2>
           <p className="text-sm text-[#635F69]">
-            Test not found. Please check the test code with your teacher.
+            {error || 'Test not found. Please check the test code with your teacher.'}
           </p>
           <div className="bg-[#FAF8FE] border border-purple-500/10 rounded-xl p-2.5 text-xs font-mono font-bold text-[#7C3AED]">
             Attempted Code: {cleanCode}
           </div>
-          <Button variant="secondary" fullWidth onClick={onBack}>
-            Back to Portal
-          </Button>
+          <div className="pt-2 flex flex-col gap-2">
+            <Button
+              variant="primary"
+              fullWidth
+              icon={<RefreshCw className="w-4 h-4" />}
+              onClick={() => setRetryTrigger(r => r + 1)}
+            >
+              Retry Cloud Lookup
+            </Button>
+            <Button variant="secondary" fullWidth onClick={onBack}>
+              Back to Portal
+            </Button>
+          </div>
         </Card>
       </div>
     );

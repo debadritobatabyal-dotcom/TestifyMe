@@ -18,6 +18,7 @@ import {
   BarChart2,
   Clock,
   KeyRound,
+  RefreshCw,
 } from 'lucide-react';
 
 export interface DashboardOverviewProps {
@@ -51,6 +52,19 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
 
   const activeTests = tests.filter(t => t.status === 'active');
   const scheduledTests = tests.filter(t => t.status === 'scheduled');
+
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
+
+  const handleManualSync = () => {
+    setIsSyncing(true);
+    Storage.syncAllToFirestore();
+    setTimeout(() => {
+      setIsSyncing(false);
+      setSyncStatus('Synced ✓');
+      setTimeout(() => setSyncStatus(null), 3000);
+    }, 1200);
+  };
 
   const handleDuplicate = (testId: string) => {
     TestService.duplicateTest(testId, teacher.id);
@@ -86,14 +100,25 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           </p>
         </div>
 
-        <Button
-          variant="primary"
-          size="md"
-          icon={<Plus className="w-4 h-4" />}
-          onClick={onOpenCreateTest}
-        >
-          Create Examination
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="md"
+            icon={<RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-[#7C3AED]' : ''}`} />}
+            onClick={handleManualSync}
+            disabled={isSyncing}
+          >
+            {syncStatus || (isSyncing ? 'Syncing...' : 'Sync Cloud')}
+          </Button>
+          <Button
+            variant="primary"
+            size="md"
+            icon={<Plus className="w-4 h-4" />}
+            onClick={onOpenCreateTest}
+          >
+            Create Examination
+          </Button>
+        </div>
       </div>
 
       {/* Top-Level 4 Stat Cards */}

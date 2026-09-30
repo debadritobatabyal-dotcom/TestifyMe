@@ -1,6 +1,22 @@
 import { Question, Test, TestAttempt, User, PublicTestAccess } from '../types';
 import { db } from '../config/firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
+
+// Firestore rejects undefined values — recursively strip or convert them to null
+export const cleanFirestoreData = (obj: any): any => {
+  if (obj === null || obj === undefined) return null;
+  if (Array.isArray(obj)) return obj.map(cleanFirestoreData);
+  if (typeof obj === 'object' && !(obj instanceof Date)) {
+    const result: any = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (v !== undefined) {
+        result[k] = cleanFirestoreData(v);
+      }
+    }
+    return result;
+  }
+  return obj;
+};
 
 const KEYS = {
   QUESTIONS: 'testifyme_questions_prod_v2',
@@ -295,38 +311,106 @@ export const Storage = {
     return undefined;
   },
 
+  saveTestLocally(test: Test): void {
+    const list = this.getTests();
+    const idx = list.findIndex(t => t.id === test.id);
+    if (idx >= 0) {
+      list[idx] = test;
+    } else {
+      list.unshift(test);
+    }
+    this.saveTests(list);
+    const code = (test.testCode || test.accessCode || '').toUpperCase();
+    if (code) {
+      this.savePublicTest({
+        testId: test.id,
+        testCode: code,
+        accessCode: code,
+        name: test.name,
+        title: test.name,
+        description: test.description,
+        status: test.status,
+        durationMinutes: test.durationMinutes,
+        startTime: test.startTime,
+        endTime: test.endTime,
+        totalQuestions: test.totalQuestions,
+        assertionReasonCount: test.assertionReasonCount,
+        mcqCount: test.mcqCount,
+        positiveMarks: test.positiveMarks,
+        negativeMarkingEnabled: test.negativeMarkingEnabled,
+        negativeMarks: test.negativeMarks,
+        isPublished: test.isPublished !== undefined ? test.isPublished : test.status !== 'draft',
+        ownerId: test.ownerId || test.createdBy || '',
+        createdAt: test.createdAt,
+      });
+    }
+  },
+
   // Asynchronous resolution supporting cross-tab, cross-window (incognito), Safari, and Firebase cloud lookup
   async resolveTestByCode(code: string): Promise<Test | undefined> {
-    const cleanCode = (code || '').trim().toUpperCase();
+    const raw = (code || '').trim();
+    const cleanCode = raw.toUpperCase();
     if (!cleanCode) return undefined;
 
     // 1. Fast path: check synchronous memory/localStorage
-    const local = this.getTestByAccessCode(cleanCode);
+    const local = this.getTestByAccessCode(cleanCode) || this.getTestById(raw) || this.getTestById(cleanCode.toLowerCase());
     if (local && local.questions && local.questions.length > 0) return local;
 
     // 2. Cloud Firestore resolution (primary path in production)
     if (db) {
       try {
+        // Strategy A: Direct lookup by access code in testAccess
         const docSnap = await getDoc(doc(db, 'testAccess', cleanCode));
         if (docSnap.exists()) {
           const pub = docSnap.data() as PublicTestAccess;
-          if (pub) {
+          if (pub && pub.testId) {
             this.savePublicTest(pub);
-            if (pub.testId) {
-              try {
-                const testSnap = await getDoc(doc(db, 'tests', pub.testId));
-                if (testSnap.exists()) {
-                  const fullTest = testSnap.data() as Test;
-                  this.saveTest(fullTest);
-                  return fullTest;
-                }
-              } catch (testErr: any) {
-                console.warn(`[TEST] Firestore test fetch error: code=${testErr?.code}, message=${testErr?.message}`);
+            try {
+              const testSnap = await getDoc(doc(db, 'tests', pub.testId));
+              if (testSnap.exists()) {
+                const fullTest = testSnap.data() as Test;
+                this.saveTestLocally(fullTest);
+                return fullTest;
               }
+            } catch (testErr: any) {
+              console.warn('[TEST] Firestore test fetch error:', testErr);
             }
-            return this.getTestByAccessCode(cleanCode);
           }
         }
+
+        // Strategy B: Lookup directly in tests collection by raw ID / lowercase / cleanCode
+        const idCandidates = [raw, cleanCode.toLowerCase(), cleanCode];
+        for (const tid of idCandidates) {
+          try {
+            const testSnap = await getDoc(doc(db, 'tests', tid));
+            if (testSnap.exists()) {
+              const fullTest = testSnap.data() as Test;
+              this.saveTestLocally(fullTest);
+              return fullTest;
+            }
+          } catch {}
+        }
+
+        // Strategy C: Query tests collection by testCode or accessCode
+        try {
+          const qTest = query(collection(db, 'tests'), where('testCode', '==', cleanCode));
+          const qSnap = await getDocs(qTest);
+          if (!qSnap.empty) {
+            const fullTest = qSnap.docs[0].data() as Test;
+            this.saveTestLocally(fullTest);
+            return fullTest;
+          }
+        } catch {}
+
+        try {
+          const qAccess = query(collection(db, 'tests'), where('accessCode', '==', cleanCode));
+          const qSnap = await getDocs(qAccess);
+          if (!qSnap.empty) {
+            const fullTest = qSnap.docs[0].data() as Test;
+            this.saveTestLocally(fullTest);
+            return fullTest;
+          }
+        } catch {}
       } catch (err: any) {
         console.warn(`[TEST] Cloud Firestore test resolution error: code=${err?.code}, message=${err?.message}`);
       }
@@ -341,7 +425,7 @@ export const Storage = {
           if (fullRes.ok && fullContentType.includes('application/json')) {
             const fullTest: Test = await fullRes.json();
             if (fullTest && fullTest.id) {
-              this.saveTest(fullTest);
+              this.saveTestLocally(fullTest);
               return fullTest;
             }
           }
@@ -358,7 +442,7 @@ export const Storage = {
                 if (testRes.ok && testContentType.includes('application/json')) {
                   const fetchedTest: Test = await testRes.json();
                   if (fetchedTest && fetchedTest.id) {
-                    this.saveTest(fetchedTest);
+                    this.saveTestLocally(fetchedTest);
                     return fetchedTest;
                   }
                 }
@@ -461,8 +545,14 @@ export const Storage = {
     // Save to live Cloud Firestore if configured
     if (db) {
       try {
-        setDoc(doc(db, 'testAccess', testCode), publicAccess, { merge: true }).catch(() => {});
-        setDoc(doc(db, 'tests', testWithOwnership.id), testWithOwnership, { merge: true }).catch(() => {});
+        const cleanAccess = cleanFirestoreData(publicAccess);
+        const cleanTest = cleanFirestoreData(testWithOwnership);
+        setDoc(doc(db, 'testAccess', testCode), cleanAccess, { merge: true })
+          .then(() => console.log(`[FIRESTORE] Saved testAccess/${testCode}`))
+          .catch(err => console.error('[FIRESTORE] Failed to save testAccess:', err));
+        setDoc(doc(db, 'tests', testWithOwnership.id), cleanTest, { merge: true })
+          .then(() => console.log(`[FIRESTORE] Saved tests/${testWithOwnership.id}`))
+          .catch(err => console.error('[FIRESTORE] Failed to save test:', err));
       } catch (err) {
         console.warn('[TestifyMe] Firestore sync error:', err);
       }
@@ -489,8 +579,20 @@ export const Storage = {
     safeStorage.setItem(KEYS.ATTEMPTS, JSON.stringify(attempts));
 
     // Also delete public test metadata
+    const code = (target.testCode || target.accessCode || '').toUpperCase();
     const publicTests = this.getPublicTests().filter(p => p.testId !== id && p.testCode !== target.testCode);
     safeStorage.setItem(KEYS.PUBLIC_TESTS, JSON.stringify(publicTests));
+
+    // Delete from live Firestore as well
+    if (db) {
+      try {
+        deleteDoc(doc(db, 'tests', id)).catch(() => {});
+        if (code) {
+          deleteDoc(doc(db, 'testAccess', code)).catch(() => {});
+        }
+      } catch {}
+    }
+
     return true;
   },
 
@@ -600,14 +702,12 @@ export const Storage = {
 
       // Live Cloud Firestore sync (Requirement 7 & 8)
       if (db) {
-        setDoc(doc(db, 'attempts', attemptWithOwnership.id), attemptWithOwnership, { merge: true })
+        setDoc(doc(db, 'attempts', attemptWithOwnership.id), cleanFirestoreData(attemptWithOwnership), { merge: true })
           .then(() => {
             console.log(`[ATTEMPT] Synced to Firestore: attempts/${attemptWithOwnership.id}`);
           })
           .catch((err: any) => {
-            console.error(
-              `[ATTEMPT] Firebase error saving attempt: code=${err?.code || 'unknown'}, message=${err?.message}`
-            );
+            console.error(`[ATTEMPT] Firebase error saving attempt:`, err);
           });
       }
 
@@ -638,12 +738,10 @@ export const Storage = {
     // Sync to Firestore
     if (db) {
       try {
-        await setDoc(doc(db, 'attempts', saved.id), saved, { merge: true });
+        await setDoc(doc(db, 'attempts', saved.id), cleanFirestoreData(saved), { merge: true });
         console.log(`[ATTEMPT] Successfully written to Firestore: attempts/${saved.id}`);
       } catch (err: any) {
-        console.error(
-          `[ATTEMPT] Firebase error saving attempt: code=${err?.code || 'unknown'}, message=${err?.message}`
-        );
+        console.error(`[ATTEMPT] Firebase error saving attempt:`, err);
         throw err;
       }
     }
@@ -720,28 +818,16 @@ export const Storage = {
 
     console.log('[TestifyMe] Syncing all local data to Firestore...');
 
-    // Firestore rejects undefined — recursively strip them
-    const clean = (obj: any): any => {
-      if (obj === null || obj === undefined) return null;
-      if (Array.isArray(obj)) return obj.map(clean);
-      if (typeof obj === 'object' && !(obj instanceof Date)) {
-        const result: any = {};
-        for (const [k, v] of Object.entries(obj)) {
-          if (v !== undefined) result[k] = clean(v);
-        }
-        return result;
-      }
-      return obj;
-    };
-
     const tests = this.getTests();
     tests.forEach(test => {
       const testCode = (test.testCode || test.accessCode || '').trim().toUpperCase();
       if (test.id) {
-        setDoc(doc(firestore, 'tests', test.id), clean(test), { merge: true }).catch(() => {});
+        setDoc(doc(firestore, 'tests', test.id), cleanFirestoreData(test), { merge: true })
+          .then(() => console.log(`[SYNC] Pushed test ${test.id} to Firestore`))
+          .catch(err => console.error(`[SYNC] Failed to push test ${test.id}:`, err));
       }
       if (testCode) {
-        const publicAccess = clean({
+        const publicAccess = cleanFirestoreData({
           testId: test.id,
           testCode,
           accessCode: testCode,
@@ -763,21 +849,23 @@ export const Storage = {
           ownerId: test.ownerId || '',
           createdAt: test.createdAt || Date.now(),
         });
-        setDoc(doc(firestore, 'testAccess', testCode), publicAccess, { merge: true }).catch(() => {});
+        setDoc(doc(firestore, 'testAccess', testCode), publicAccess, { merge: true })
+          .then(() => console.log(`[SYNC] Pushed testAccess ${testCode} to Firestore`))
+          .catch(err => console.error(`[SYNC] Failed to push testAccess ${testCode}:`, err));
       }
     });
 
     const questions = this.getQuestions();
     questions.forEach(q => {
       if (q.id) {
-        setDoc(doc(firestore, 'questions', q.id), clean(q), { merge: true }).catch(() => {});
+        setDoc(doc(firestore, 'questions', q.id), cleanFirestoreData(q), { merge: true }).catch(() => {});
       }
     });
 
     const attempts = this.getAttempts();
     attempts.forEach(att => {
       if (att.id) {
-        setDoc(doc(firestore, 'attempts', att.id), clean(att), { merge: true }).catch(() => {});
+        setDoc(doc(firestore, 'attempts', att.id), cleanFirestoreData(att), { merge: true }).catch(() => {});
       }
     });
 
@@ -785,14 +873,9 @@ export const Storage = {
   },
 };
 
-// Auto-sync localStorage → Firestore on app startup (one-time push for existing data)
+// Auto-sync localStorage → Firestore on app startup
 if (db && typeof window !== 'undefined') {
-  const syncKey = 'testifyme_firestore_synced_v2';
-  if (!safeStorage.getItem(syncKey)) {
-    // Delay to let app initialize first
-    setTimeout(() => {
-      Storage.syncAllToFirestore();
-      safeStorage.setItem(syncKey, Date.now().toString());
-    }, 2000);
-  }
+  setTimeout(() => {
+    Storage.syncAllToFirestore();
+  }, 1000);
 }

@@ -13,12 +13,12 @@ export interface FirebaseConfig {
 }
 
 const firebaseConfig: FirebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyArmydnqOIfAVYtevj_RK2Z6v9Z9AgX5wY',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'testifyme-5ddb1.firebaseapp.com',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'testifyme-5ddb1',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'testifyme-5ddb1.firebasestorage.app',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '803813527493',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:803813527493:web:d0fa48aff123833c4185ac',
 };
 
 export const isFirebaseConfigured = Boolean(
@@ -35,14 +35,16 @@ let storage: FirebaseStorage | null = null;
 if (isFirebaseConfigured) {
   try {
     app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-    auth = getAuth(app);
-    // Explicit web persistence configuration (Requirement 4)
-    setPersistence(auth, browserLocalPersistence).catch(err => {
-      console.warn('[TestifyMe] Failed to set browserLocalPersistence:', err);
-    });
+    // Always initialize Firestore first so it is available regardless of auth state
     db = getFirestore(app);
     storage = getStorage(app);
-    console.log('[TestifyMe] Connected to live Firebase instance.');
+    try {
+      auth = getAuth(app);
+      setPersistence(auth, browserLocalPersistence).catch(() => {});
+    } catch (authErr) {
+      console.warn('[TestifyMe] Firebase Auth setup notice:', authErr);
+    }
+    console.log('[TestifyMe] Connected to live Firebase Firestore instance.');
   } catch (error) {
     console.warn('[TestifyMe] Firebase initialization failed, falling back to local persistent store:', error);
   }

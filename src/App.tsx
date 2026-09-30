@@ -214,6 +214,7 @@ export function App() {
                 window.history.pushState({}, '', '/');
                 setCurrentPath('/');
               }}
+              onRequireLogin={() => setIsLoginModalOpen(true)}
             />
           </main>
         </div>
