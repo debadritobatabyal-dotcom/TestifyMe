@@ -1,5 +1,5 @@
 import { User } from '../types';
-import { Storage } from './storage';
+import { Storage, cleanFirestoreData } from './storage';
 import { auth, db } from '../config/firebase';
 import {
   createUserWithEmailAndPassword,
@@ -7,7 +7,7 @@ import {
   signOut,
   onAuthStateChanged,
 } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
 
 type AuthListener = (user: User | null) => void;
 const listeners: Set<AuthListener> = new Set();
@@ -115,8 +115,22 @@ export const AuthService = {
     }
 
     const existing = Storage.getUserByEmail(cleanEmail);
-    if (existing) {
+    if (existing && existing.role === 'teacher') {
       return { error: 'An account with this email address already exists. Please log in.' };
+    }
+
+    // Check if teacher already exists in Firestore to avoid duplicate accounts
+    if (db) {
+      try {
+        const q = query(collection(db, 'users'), where('email', '==', cleanEmail));
+        const qSnap = await getDocs(q);
+        const existingTeacher = qSnap.docs.map(d => d.data() as User).find(u => u.role === 'teacher');
+        if (existingTeacher) {
+          return { error: 'An account with this email address already exists. Please sign in via Faculty Login.' };
+        }
+      } catch {
+        // ignore
+      }
     }
 
     // Primary Identity: Unique UID (Firebase UID or fallback unique UID)
@@ -150,7 +164,7 @@ export const AuthService = {
     Storage.saveUser(newTeacher);
     Storage.setCurrentUser(newTeacher);
 
-    // Save profile to Firestore
+    // Save profile to Firestore with passwordHash so any device can authenticate
     if (db) {
       try {
         await setDoc(doc(db, 'users', uid), {
@@ -158,6 +172,7 @@ export const AuthService = {
           name: newTeacher.name,
           email: newTeacher.email,
           role: 'teacher',
+          passwordHash: params.password,
           schoolName: newTeacher.schoolName || null,
           department: newTeacher.department || null,
           title: newTeacher.title || null,
@@ -186,97 +201,102 @@ export const AuthService = {
     return { user: newTeacher };
   },
 
-  // Teacher Login (Requirement 1, 2, 3)
+  // Teacher Login (Requirement 1, 2, 3 - Fully works across devices)
   async loginTeacher(email: string, password: string): Promise<{ user?: User; error?: string }> {
     const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail || !password) {
       return { error: 'Email and password are required.' };
     }
 
-    if (auth) {
+    let teacher: User | null = null;
+
+    // 1. Fast path: check local storage if on same device
+    const localUser = Storage.getUserByEmail(cleanEmail);
+    if (localUser && localUser.role === 'teacher') {
+      if (!localUser.passwordHash || localUser.passwordHash === password) {
+        teacher = localUser;
+      } else {
+        return { error: 'Incorrect faculty password. Please try again.' };
+      }
+    }
+
+    // 2. Cloud Firestore lookup (for new devices, phones, cross-browser sessions)
+    if (!teacher && db) {
+      try {
+        const q = query(collection(db, 'users'), where('email', '==', cleanEmail));
+        const qSnap = await getDocs(q);
+        if (!qSnap.empty) {
+          const teacherDocs = qSnap.docs
+            .map(d => d.data() as User)
+            .filter(u => u.role === 'teacher');
+
+          if (teacherDocs.length > 0) {
+            // Check matching passwordHash
+            let matchedTeacher = teacherDocs.find(t => t.passwordHash === password);
+            if (!matchedTeacher) {
+              // Legacy profile from before password was stored in Firestore
+              const legacyTeacher = teacherDocs.find(t => !t.passwordHash);
+              if (legacyTeacher) {
+                legacyTeacher.passwordHash = password;
+                setDoc(doc(db, 'users', legacyTeacher.id), { passwordHash: password }, { merge: true }).catch(() => {});
+                matchedTeacher = legacyTeacher;
+              } else {
+                return { error: 'Incorrect faculty password. Please try again.' };
+              }
+            }
+            teacher = matchedTeacher;
+          }
+        }
+      } catch (err: any) {
+        console.warn('[AUTH] Firestore teacher lookup warning:', err);
+      }
+    }
+
+    // 3. Optional Firebase Auth fallback (if configured)
+    if (!teacher && auth) {
       try {
         const userCred = await signInWithEmailAndPassword(auth, cleanEmail, password);
         const fbUid = userCred.user.uid;
         const fbEmail = userCred.user.email || cleanEmail;
-        console.log(`[AUTH] Firebase teacher logged in: UID ${fbUid}`);
-        let teacher: User | undefined = Storage.getUserById(fbUid) || Storage.getUserByEmail(cleanEmail);
-
-        // Try Firestore if not in local cache (fresh device)
-        if (!teacher && db) {
-          try {
-            const snap = await getDoc(doc(db, 'users', fbUid));
-            if (snap.exists()) {
-              teacher = snap.data() as User;
-              Storage.saveUser(teacher);
-              console.log(`[AUTH] Loaded teacher profile from Firestore: ${fbUid}`);
-            }
-          } catch (err: any) {
-            console.error(`[AUTH] Firebase error reading teacher profile: code=${err?.code || 'unknown'}, message=${err?.message}`);
-          }
+        teacher = {
+          id: fbUid,
+          name: userCred.user.displayName || fbEmail.split('@')[0],
+          email: fbEmail,
+          role: 'teacher',
+          passwordHash: password,
+          createdAt: Date.now(),
+        };
+        if (db) {
+          setDoc(doc(db, 'users', fbUid), cleanFirestoreData(teacher), { merge: true }).catch(() => {});
         }
-
-        // If still no profile (Firestore may be empty/failed), build a minimal one from Firebase Auth
-        if (!teacher) {
-          console.warn(`[AUTH] No Firestore profile found for ${fbUid} — creating fallback profile from Firebase Auth.`);
-          teacher = {
-            id: fbUid,
-            name: userCred.user.displayName || fbEmail.split('@')[0],
-            email: fbEmail,
-            role: 'teacher',
-            createdAt: Date.now(),
-          };
-          Storage.saveUser(teacher);
-          // Write back to Firestore so other devices can load it
-          if (db) {
-            setDoc(doc(db, 'users', fbUid), {
-              id: fbUid,
-              name: teacher.name,
-              email: teacher.email,
-              role: 'teacher',
-              createdAt: teacher.createdAt,
-            }, { merge: true }).catch(() => {});
-          }
-        }
-
-        // Fix: if profile exists but has wrong role (edge case), treat as teacher if Firebase Auth says so
-        if (teacher.role !== 'teacher') {
-          teacher = { ...teacher, role: 'teacher' };
-          Storage.saveUser(teacher);
-        }
-
-        Storage.setCurrentUser(teacher);
-        notifyListeners(teacher);
-        return { user: teacher };
-      } catch (signInErr: any) {
-        const code = signInErr?.code || 'unknown';
-        console.warn(`[AUTH] Firebase teacher signIn error: code=${code}, message=${signInErr?.message}`);
-        // Translate Firebase Auth error codes to user-friendly messages
-        if (code === 'auth/user-not-found' || code === 'auth/invalid-credential') {
-          return { error: 'No account found with this email. Please register first.' };
-        }
-        if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
-          return { error: 'Incorrect password. Please try again.' };
-        }
-        if (code === 'auth/too-many-requests') {
-          return { error: 'Too many failed attempts. Please wait a few minutes and try again.' };
-        }
-        // For network errors, fall through to localStorage
+      } catch (fbErr: any) {
+        console.warn('[AUTH] Firebase Auth fallback code:', fbErr?.code);
       }
     }
 
-    // Fallback: local-only auth (offline / no Firebase)
-    const user = Storage.getUserByEmail(cleanEmail);
-    if (!user || user.role !== 'teacher') {
+    if (!teacher) {
       return { error: 'No faculty account found with this email. Please register as a new teacher.' };
     }
 
-    if (user.passwordHash && user.passwordHash !== password) {
-      return { error: 'Incorrect faculty password. Please try again.' };
+    // Ensure role is teacher
+    if (teacher.role !== 'teacher') {
+      teacher = { ...teacher, role: 'teacher' };
     }
 
-    Storage.setCurrentUser(user);
-    notifyListeners(user);
-    return { user };
+    Storage.saveUser(teacher);
+    Storage.setCurrentUser(teacher);
+
+    // Sync all existing tests and questions for this teacher from Firestore to this device
+    if (db) {
+      try {
+        await Storage.syncTeacherFromFirestore(teacher.id);
+      } catch (syncErr) {
+        console.warn('[AUTH] Background test sync notice:', syncErr);
+      }
+    }
+
+    notifyListeners(teacher);
+    return { user: teacher };
   },
 
   // Update Teacher Profile (Requirement 7)
@@ -364,6 +384,7 @@ export const AuthService = {
           email: newStudent.email,
           role: 'student',
           studentId: newStudent.studentId,
+          passwordHash: params.password,
           phoneNumber: newStudent.phoneNumber || null,
           createdAt: newStudent.createdAt,
         });
@@ -390,89 +411,92 @@ export const AuthService = {
     return { user: newStudent };
   },
 
-  // Student Login (Requirement 2 & 27)
+  // Student Login (Requirement 2 & 27 - Fully works across devices)
   async loginStudent(email: string, password: string): Promise<{ user?: User; error?: string }> {
     const cleanEmail = email.trim().toLowerCase();
-    if (auth) {
+    if (!cleanEmail || !password) {
+      return { error: 'Email and password are required.' };
+    }
+
+    let student: User | null = null;
+
+    // 1. Fast path: check local storage if on same device
+    const localUser = Storage.getUserByEmail(cleanEmail);
+    if (localUser && localUser.role === 'student') {
+      if (!localUser.passwordHash || localUser.passwordHash === password) {
+        student = localUser;
+      } else {
+        return { error: 'Incorrect student password. Please try again.' };
+      }
+    }
+
+    // 2. Cloud Firestore lookup (cross-device)
+    if (!student && db) {
+      try {
+        const q = query(collection(db, 'users'), where('email', '==', cleanEmail));
+        const qSnap = await getDocs(q);
+        if (!qSnap.empty) {
+          const studentDocs = qSnap.docs
+            .map(d => d.data() as User)
+            .filter(u => u.role === 'student');
+
+          if (studentDocs.length > 0) {
+            let matchedStudent = studentDocs.find(s => s.passwordHash === password);
+            if (!matchedStudent) {
+              const legacyStudent = studentDocs.find(s => !s.passwordHash);
+              if (legacyStudent) {
+                legacyStudent.passwordHash = password;
+                setDoc(doc(db, 'users', legacyStudent.id), { passwordHash: password }, { merge: true }).catch(() => {});
+                matchedStudent = legacyStudent;
+              } else {
+                return { error: 'Incorrect student password. Please try again.' };
+              }
+            }
+            student = matchedStudent;
+          }
+        }
+      } catch (err: any) {
+        console.warn('[AUTH] Firestore student lookup error:', err);
+      }
+    }
+
+    // 3. Fallback: Firebase Auth (if configured)
+    if (!student && auth) {
       try {
         const userCred = await signInWithEmailAndPassword(auth, cleanEmail, password);
         const fbUid = userCred.user.uid;
         const fbEmail = userCred.user.email || cleanEmail;
-        console.log(`[AUTH] Firebase student logged in: UID ${fbUid}`);
-        let user: User | undefined = Storage.getUserById(fbUid) || Storage.getUserByEmail(cleanEmail);
-
-        // Try Firestore if not in local cache (fresh device)
-        if (!user && db) {
-          try {
-            const snap = await getDoc(doc(db, 'users', fbUid));
-            if (snap.exists()) {
-              user = snap.data() as User;
-              Storage.saveUser(user);
-              console.log(`[AUTH] Loaded student profile from Firestore: ${fbUid}`);
-            }
-          } catch (err: any) {
-            console.error(`[AUTH] Firebase error reading student profile: code=${err?.code || 'unknown'}, message=${err?.message}`);
-          }
+        student = {
+          id: fbUid,
+          name: userCred.user.displayName || fbEmail.split('@')[0],
+          email: fbEmail,
+          role: 'student',
+          studentId: `ROLL-${Math.floor(1000 + Math.random() * 9000)}`,
+          passwordHash: password,
+          createdAt: Date.now(),
+        };
+        if (db) {
+          setDoc(doc(db, 'users', fbUid), cleanFirestoreData(student), { merge: true }).catch(() => {});
         }
-
-        // Fallback: build minimal profile from Firebase Auth data
-        if (!user) {
-          console.warn(`[AUTH] No Firestore profile for student ${fbUid} — building fallback from Firebase Auth.`);
-          user = {
-            id: fbUid,
-            name: userCred.user.displayName || fbEmail.split('@')[0],
-            email: fbEmail,
-            role: 'student',
-            studentId: `ROLL-${Math.floor(1000 + Math.random() * 9000)}`,
-            createdAt: Date.now(),
-          };
-          Storage.saveUser(user);
-          if (db) {
-            setDoc(doc(db, 'users', fbUid), {
-              id: fbUid,
-              name: user.name,
-              email: user.email,
-              role: 'student',
-              studentId: user.studentId,
-              createdAt: user.createdAt,
-            }, { merge: true }).catch(() => {});
-          }
-        }
-
-        if (user.role === 'student') {
-          Storage.setCurrentUser(user);
-          notifyListeners(user);
-          return { user };
-        }
-      } catch (signInErr: any) {
-        const code = signInErr?.code || 'unknown';
-        console.warn(`[AUTH] Firebase student signIn error: code=${code}, message=${signInErr?.message}`);
-        if (code === 'auth/user-not-found' || code === 'auth/invalid-credential') {
-          return { error: 'No account found with this email. Please register first.' };
-        }
-        if (code === 'auth/wrong-password') {
-          return { error: 'Incorrect password. Please try again.' };
-        }
-        if (code === 'auth/too-many-requests') {
-          return { error: 'Too many failed attempts. Please wait a few minutes.' };
-        }
+      } catch (fbErr: any) {
+        console.warn('[AUTH] Firebase student fallback:', fbErr?.code);
       }
     }
 
-    // Fallback: local-only auth
-    const user = Storage.getUserByEmail(cleanEmail);
-    if (!user || user.role !== 'student') {
+    if (!student) {
       return { error: 'No student account found with this email. Please register first.' };
     }
 
-    if (user.passwordHash && user.passwordHash !== password) {
-      return { error: 'Incorrect password. Please try again.' };
+    if (student.role !== 'student') {
+      student = { ...student, role: 'student' };
     }
 
-    Storage.setCurrentUser(user);
-    notifyListeners(user);
-    return { user };
+    Storage.saveUser(student);
+    Storage.setCurrentUser(student);
+    notifyListeners(student);
+    return { user: student };
   },
+
 
   // General login method for test and backward compatibility
   async login(email: string, password?: string, role?: 'student' | 'teacher'): Promise<User> {

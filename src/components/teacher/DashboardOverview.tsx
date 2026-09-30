@@ -43,6 +43,8 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     const unsub = ExamService.subscribeToTeacherAttempts(teacher.id, undefined, updatedAttempts => {
       setAttempts(updatedAttempts);
     });
+    // Cross-device sync: check for any tests or questions created on other devices
+    Storage.syncTeacherFromFirestore(teacher.id);
     return unsub;
   }, [teacher.id]);
 
@@ -56,14 +58,15 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
 
-  const handleManualSync = () => {
+  const handleManualSync = async () => {
     setIsSyncing(true);
     Storage.syncAllToFirestore();
+    await Storage.syncTeacherFromFirestore(teacher.id);
     setTimeout(() => {
       setIsSyncing(false);
       setSyncStatus('Synced ✓');
       setTimeout(() => setSyncStatus(null), 3000);
-    }, 1200);
+    }, 800);
   };
 
   const handleDuplicate = (testId: string) => {

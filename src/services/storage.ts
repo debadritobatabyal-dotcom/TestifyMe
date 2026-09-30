@@ -871,6 +871,76 @@ export const Storage = {
 
     console.log(`[TestifyMe] Sync complete: ${tests.length} tests, ${questions.length} questions, ${attempts.length} attempts`);
   },
+
+  // Sync tests and questions for a teacher from Firestore to local storage (cross-device restoration)
+  async syncTeacherFromFirestore(teacherId: string): Promise<boolean> {
+    if (!db || !teacherId) return false;
+    let changed = false;
+    try {
+      // 1. Fetch tests where ownerId == teacherId
+      const qOwner = query(collection(db, 'tests'), where('ownerId', '==', teacherId));
+      const snapOwner = await getDocs(qOwner);
+      snapOwner.forEach(d => {
+        const t = d.data() as Test;
+        if (t && t.id) {
+          this.saveTestLocally(t);
+          changed = true;
+        }
+      });
+
+      // 2. Fetch tests where createdBy == teacherId
+      const qCreated = query(collection(db, 'tests'), where('createdBy', '==', teacherId));
+      const snapCreated = await getDocs(qCreated);
+      snapCreated.forEach(d => {
+        const t = d.data() as Test;
+        if (t && t.id) {
+          this.saveTestLocally(t);
+          changed = true;
+        }
+      });
+
+      // 3. Fetch questions owned by this teacher
+      const qQuestions = query(collection(db, 'questions'), where('ownerId', '==', teacherId));
+      const snapQuestions = await getDocs(qQuestions);
+      if (!snapQuestions.empty) {
+        const qList: Question[] = [];
+        snapQuestions.forEach(d => {
+          const q = d.data() as Question;
+          if (q && q.id) qList.push(q);
+        });
+        if (qList.length > 0) {
+          this.addQuestionsBulk(qList, teacherId);
+          changed = true;
+        }
+      }
+
+      // 4. Also extract questions from loaded tests to populate the question bank
+      const currentTests = this.getTests(teacherId);
+      const allTestQuestions: Question[] = [];
+      currentTests.forEach(test => {
+        if (Array.isArray(test.questions)) {
+          test.questions.forEach(q => {
+            if (q && q.id && q.questionText) {
+              const fullQ = q as any;
+              allTestQuestions.push({
+                ...q,
+                correctAnswer: fullQ.correctAnswer || (test.answerKeys && test.answerKeys[q.id]) || 'A',
+                active: fullQ.active !== undefined ? fullQ.active : true,
+                createdAt: fullQ.createdAt || test.createdAt || Date.now(),
+                ownerId: teacherId,
+              });
+            }
+          });
+        }
+      });
+      if (allTestQuestions.length > 0) {
+        this.addQuestionsBulk(allTestQuestions, teacherId);
+      }
+    } catch (err) {
+      console.warn('[STORAGE] syncTeacherFromFirestore notice:', err);
+    }
+    return changed;
+  },
 };
 
 // Auto-sync localStorage → Firestore on app startup
