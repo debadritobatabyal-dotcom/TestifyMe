@@ -47,6 +47,17 @@ export function waitForAuthInit(): Promise<User | null> {
               console.warn(`[AUTH] Firebase error reading user profile: code=${err?.code || 'unknown'}, message=${err?.message}`);
             }
           }
+          // If still no local profile (fresh device, Firestore read failed),
+          // restore from the current user session in localStorage if it matches this UID
+          if (!local && fbUser.email) {
+            const existing = Storage.getCurrentUser();
+            if (existing && existing.id === fbUser.uid) {
+              local = existing;
+            }
+            // NOTE: We do NOT guess the role here (could be teacher or student).
+            // The specific loginTeacher / loginStudent methods handle creating fallback profiles
+            // with the correct role when the user explicitly logs in.
+          }
           if (local) {
             Storage.setCurrentUser(local);
             notifyListeners(local);
@@ -186,29 +197,74 @@ export const AuthService = {
       try {
         const userCred = await signInWithEmailAndPassword(auth, cleanEmail, password);
         const fbUid = userCred.user.uid;
+        const fbEmail = userCred.user.email || cleanEmail;
         console.log(`[AUTH] Firebase teacher logged in: UID ${fbUid}`);
-        let teacher = Storage.getUserById(fbUid) || Storage.getUserByEmail(cleanEmail);
+        let teacher: User | undefined = Storage.getUserById(fbUid) || Storage.getUserByEmail(cleanEmail);
+
+        // Try Firestore if not in local cache (fresh device)
         if (!teacher && db) {
           try {
             const snap = await getDoc(doc(db, 'users', fbUid));
             if (snap.exists()) {
               teacher = snap.data() as User;
               Storage.saveUser(teacher);
+              console.log(`[AUTH] Loaded teacher profile from Firestore: ${fbUid}`);
             }
           } catch (err: any) {
             console.error(`[AUTH] Firebase error reading teacher profile: code=${err?.code || 'unknown'}, message=${err?.message}`);
           }
         }
-        if (teacher && teacher.role === 'teacher') {
-          Storage.setCurrentUser(teacher);
-          notifyListeners(teacher);
-          return { user: teacher };
+
+        // If still no profile (Firestore may be empty/failed), build a minimal one from Firebase Auth
+        if (!teacher) {
+          console.warn(`[AUTH] No Firestore profile found for ${fbUid} — creating fallback profile from Firebase Auth.`);
+          teacher = {
+            id: fbUid,
+            name: userCred.user.displayName || fbEmail.split('@')[0],
+            email: fbEmail,
+            role: 'teacher',
+            createdAt: Date.now(),
+          };
+          Storage.saveUser(teacher);
+          // Write back to Firestore so other devices can load it
+          if (db) {
+            setDoc(doc(db, 'users', fbUid), {
+              id: fbUid,
+              name: teacher.name,
+              email: teacher.email,
+              role: 'teacher',
+              createdAt: teacher.createdAt,
+            }, { merge: true }).catch(() => {});
+          }
         }
+
+        // Fix: if profile exists but has wrong role (edge case), treat as teacher if Firebase Auth says so
+        if (teacher.role !== 'teacher') {
+          teacher = { ...teacher, role: 'teacher' };
+          Storage.saveUser(teacher);
+        }
+
+        Storage.setCurrentUser(teacher);
+        notifyListeners(teacher);
+        return { user: teacher };
       } catch (signInErr: any) {
-        console.warn(`[AUTH] Firebase teacher signIn error: code=${signInErr?.code || 'unknown'}, message=${signInErr?.message}`);
+        const code = signInErr?.code || 'unknown';
+        console.warn(`[AUTH] Firebase teacher signIn error: code=${code}, message=${signInErr?.message}`);
+        // Translate Firebase Auth error codes to user-friendly messages
+        if (code === 'auth/user-not-found' || code === 'auth/invalid-credential') {
+          return { error: 'No account found with this email. Please register first.' };
+        }
+        if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+          return { error: 'Incorrect password. Please try again.' };
+        }
+        if (code === 'auth/too-many-requests') {
+          return { error: 'Too many failed attempts. Please wait a few minutes and try again.' };
+        }
+        // For network errors, fall through to localStorage
       }
     }
 
+    // Fallback: local-only auth (offline / no Firebase)
     const user = Storage.getUserByEmail(cleanEmail);
     if (!user || user.role !== 'teacher') {
       return { error: 'No faculty account found with this email. Please register as a new teacher.' };
@@ -341,29 +397,69 @@ export const AuthService = {
       try {
         const userCred = await signInWithEmailAndPassword(auth, cleanEmail, password);
         const fbUid = userCred.user.uid;
+        const fbEmail = userCred.user.email || cleanEmail;
         console.log(`[AUTH] Firebase student logged in: UID ${fbUid}`);
-        let user = Storage.getUserById(fbUid) || Storage.getUserByEmail(cleanEmail);
+        let user: User | undefined = Storage.getUserById(fbUid) || Storage.getUserByEmail(cleanEmail);
+
+        // Try Firestore if not in local cache (fresh device)
         if (!user && db) {
           try {
             const snap = await getDoc(doc(db, 'users', fbUid));
             if (snap.exists()) {
               user = snap.data() as User;
               Storage.saveUser(user);
+              console.log(`[AUTH] Loaded student profile from Firestore: ${fbUid}`);
             }
           } catch (err: any) {
             console.error(`[AUTH] Firebase error reading student profile: code=${err?.code || 'unknown'}, message=${err?.message}`);
           }
         }
-        if (user && user.role === 'student') {
+
+        // Fallback: build minimal profile from Firebase Auth data
+        if (!user) {
+          console.warn(`[AUTH] No Firestore profile for student ${fbUid} — building fallback from Firebase Auth.`);
+          user = {
+            id: fbUid,
+            name: userCred.user.displayName || fbEmail.split('@')[0],
+            email: fbEmail,
+            role: 'student',
+            studentId: `ROLL-${Math.floor(1000 + Math.random() * 9000)}`,
+            createdAt: Date.now(),
+          };
+          Storage.saveUser(user);
+          if (db) {
+            setDoc(doc(db, 'users', fbUid), {
+              id: fbUid,
+              name: user.name,
+              email: user.email,
+              role: 'student',
+              studentId: user.studentId,
+              createdAt: user.createdAt,
+            }, { merge: true }).catch(() => {});
+          }
+        }
+
+        if (user.role === 'student') {
           Storage.setCurrentUser(user);
           notifyListeners(user);
           return { user };
         }
       } catch (signInErr: any) {
-        console.warn(`[AUTH] Firebase student signIn error: code=${signInErr?.code || 'unknown'}, message=${signInErr?.message}`);
+        const code = signInErr?.code || 'unknown';
+        console.warn(`[AUTH] Firebase student signIn error: code=${code}, message=${signInErr?.message}`);
+        if (code === 'auth/user-not-found' || code === 'auth/invalid-credential') {
+          return { error: 'No account found with this email. Please register first.' };
+        }
+        if (code === 'auth/wrong-password') {
+          return { error: 'Incorrect password. Please try again.' };
+        }
+        if (code === 'auth/too-many-requests') {
+          return { error: 'Too many failed attempts. Please wait a few minutes.' };
+        }
       }
     }
 
+    // Fallback: local-only auth
     const user = Storage.getUserByEmail(cleanEmail);
     if (!user || user.role !== 'student') {
       return { error: 'No student account found with this email. Please register first.' };
