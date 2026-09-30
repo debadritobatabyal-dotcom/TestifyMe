@@ -70,11 +70,7 @@ if (typeof window !== 'undefined' && auth) {
 
 export const AuthService = {
   getCurrentUser(): User | null {
-    const stored = Storage.getCurrentUser();
-    if (stored) return stored;
-    const guest: User = { id: 'guest-teacher', name: 'Guest Teacher', role: 'teacher', email: 'guest@local', createdAt: Date.now() };
-    Storage.setCurrentUser(guest);
-    return guest;
+    return Storage.getCurrentUser();
   },
 
 
