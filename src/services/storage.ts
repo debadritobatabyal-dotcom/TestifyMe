@@ -710,4 +710,76 @@ export const Storage = {
       safeStorage.removeItem(KEYS.CURRENT_USER);
     }
   },
+
+  // Sync all local data to Firestore (fixes tests created before Firebase was configured)
+  syncAllToFirestore(): void {
+    if (!db) return;
+    const firestore = db; // non-null reference for TypeScript
+
+    console.log('[TestifyMe] Syncing all local data to Firestore...');
+
+    // Sync all tests + their public access metadata
+    const tests = this.getTests();
+    tests.forEach(test => {
+      const testCode = (test.testCode || test.accessCode || '').trim().toUpperCase();
+      if (test.id) {
+        setDoc(doc(firestore, 'tests', test.id), test, { merge: true }).catch(() => {});
+      }
+      if (testCode) {
+        const publicAccess = {
+          testId: test.id,
+          testCode,
+          accessCode: testCode,
+          name: test.name,
+          title: test.name,
+          description: test.description,
+          status: test.status,
+          durationMinutes: test.durationMinutes,
+          startTime: test.startTime,
+          endTime: test.endTime,
+          totalQuestions: test.totalQuestions,
+          assertionReasonCount: test.assertionReasonCount,
+          mcqCount: test.mcqCount,
+          positiveMarks: test.positiveMarks,
+          negativeMarkingEnabled: test.negativeMarkingEnabled,
+          negativeMarks: test.negativeMarks,
+          negativeMarking: test.negativeMarking,
+          isPublished: test.isPublished ?? (test.status !== 'draft'),
+          ownerId: test.ownerId,
+          createdAt: test.createdAt,
+        };
+        setDoc(doc(firestore, 'testAccess', testCode), publicAccess, { merge: true }).catch(() => {});
+      }
+    });
+
+    // Sync all questions
+    const questions = this.getQuestions();
+    questions.forEach(q => {
+      if (q.id) {
+        setDoc(doc(firestore, 'questions', q.id), q, { merge: true }).catch(() => {});
+      }
+    });
+
+    // Sync all attempts
+    const attempts = this.getAttempts();
+    attempts.forEach(att => {
+      if (att.id) {
+        setDoc(doc(firestore, 'attempts', att.id), att, { merge: true }).catch(() => {});
+      }
+    });
+
+    console.log(`[TestifyMe] Sync complete: ${tests.length} tests, ${questions.length} questions, ${attempts.length} attempts`);
+  },
 };
+
+// Auto-sync localStorage → Firestore on app startup (one-time push for existing data)
+if (db && typeof window !== 'undefined') {
+  const syncKey = 'testifyme_firestore_synced_v1';
+  if (!safeStorage.getItem(syncKey)) {
+    // Delay to let app initialize first
+    setTimeout(() => {
+      Storage.syncAllToFirestore();
+      safeStorage.setItem(syncKey, Date.now().toString());
+    }, 2000);
+  }
+}
