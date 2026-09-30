@@ -141,10 +141,13 @@ export function App() {
           </main>
 
           {isLoginModalOpen && (
-            <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-              <div className="w-full max-w-md relative">
+            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto overscroll-contain">
+              <div className="w-full max-w-md my-auto">
                 <LoginView
                   initialRole="student"
+                  initialMode="register"
+                  isModal={true}
+                  onClose={() => setIsLoginModalOpen(false)}
                   onLoginSuccess={() => {
                     setIsLoginModalOpen(false);
                     setCurrentUser(AuthService.getCurrentUser());
